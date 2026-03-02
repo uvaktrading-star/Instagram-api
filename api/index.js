@@ -8,6 +8,95 @@ app.use(express.json());
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
 
+// --- 🎬 [NEW] TheNkiri Movie Scraper API ---
+// --- 🔍 1. Search API (ලිස්ට් එකක් ලබා ගැනීමට) ---
+app.get('/api/search', async (req, res) => {
+    let { text } = req.query;
+    if (!text) return res.status(400).json({ status: false, message: "Search නමක් ලබා දෙන්න." });
+
+    try {
+        const searchUrl = `https://thenkiri.com/?s=${encodeURIComponent(text)}&post_type=post`;
+        const { data } = await axios.get(searchUrl, { headers: { 'User-Agent': USER_AGENT } });
+        const $ = cheerio.load(data);
+
+        let results = [];
+        // මූවීස් 10ක් දක්වා ලිස්ට් එක ගමු
+        $('article').slice(0, 10).each((i, el) => {
+            const title = $(el).find('.entry-title a').text().trim();
+            const link = $(el).find('.entry-title a').attr('href');
+            const img = $(el).find('img').attr('src');
+
+            if (link) {
+                results.push({
+                    index: i + 1,
+                    title: title,
+                    url: link,
+                    thumbnail: img
+                });
+            }
+        });
+
+        res.json({ status: true, results });
+    } catch (e) {
+        res.status(500).json({ status: false, error: e.message });
+    }
+});
+
+// --- 🎬 2. Direct Link API (තෝරාගත් මූවී එකේ ලින්ක් එක හරහා) ---
+app.get('/api/thenkiri', async (req, res) => {
+    let { url } = req.query;
+    if (!url) return res.status(400).json({ status: false, message: "URL එකක් ලබා දෙන්න." });
+
+    try {
+        const response = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
+        const $ = cheerio.load(response.data);
+        const title = $('h1.entry-title').text().trim();
+        const thumbnail = ($('meta[property="og:image"]').attr('content') || "").trim();
+        
+        const rawLinks = [];
+        $('a[href*="downloadwella.com"]').each((i, el) => {
+            rawLinks.push({ quality: $(el).text().trim(), link: $(el).attr('href') });
+        });
+
+        let dlLinks = [];
+        for (let item of rawLinks) {
+            try {
+                const pageRes = await axios.get(item.link, { headers: { 'User-Agent': USER_AGENT } });
+                const $dlPage = cheerio.load(pageRes.data);
+                const formData = new URLSearchParams();
+                
+                $dlPage('form input').each((i, input) => {
+                    const name = $dlPage(input).attr('name');
+                    const value = $dlPage(input).attr('value');
+                    if (name) formData.append(name, value || '');
+                });
+
+                const postRes = await axios.post(item.link, formData.toString(), {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'User-Agent': USER_AGENT,
+                        'Referer': item.link,
+                        'Cookie': pageRes.headers['set-cookie'] ? pageRes.headers['set-cookie'].join('; ') : ''
+                    }
+                });
+
+                const $final = cheerio.load(postRes.data);
+                const directLink = $final('a[href*="downloadwella.com/d/"]').attr('href');
+
+                dlLinks.push({
+                    quality: item.quality,
+                    direct_link: directLink || item.link
+                });
+            } catch (err) {
+                dlLinks.push({ quality: item.quality, direct_link: item.link });
+            }
+        }
+        res.json({ status: true, title, thumbnail, links: dlLinks });
+    } catch (e) {
+        res.status(500).json({ status: false, error: e.message });
+    }
+});
+
 // --- 📸 Instagram API ---
 app.get('/api/insta', async (req, res) => {
     let { url } = req.query;
@@ -93,3 +182,4 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
+
