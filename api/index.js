@@ -15,6 +15,70 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
+// --- 🔍 01. XNXX Search API ---
+app.get('/api/xnxx/search', async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ status: false, message: "සෙවුම් පදය ඇතුළත් කරන්න." });
+
+    try {
+        // මෙතැන .com වෙනුවට .tv පාවිච්චි කළා
+        const url = `https://www.xnxx.tv/search/${encodeURIComponent(q)}`;
+        const { data } = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
+        const $ = cheerio.load(data);
+        let results = [];
+
+        $('.thumb-block').each((i, el) => {
+            const title = $(el).find('.thumb-under a').first().attr('title');
+            const link = $(el).find('.thumb-under a').first().attr('href');
+            const thumb = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
+
+            if (link && title) {
+                results.push({
+                    title: title,
+                    // ලින්ක් එක .tv විදිහටම සකස් කරනවා
+                    url: link.startsWith('http') ? link : `https://www.xnxx.tv${link}`,
+                    thumbnail: thumb
+                });
+            }
+        });
+
+        res.json({ status: true, results: results.slice(0, 15) });
+    } catch (e) {
+        res.status(500).json({ status: false, error: "Search failed: " + e.message });
+    }
+});
+
+// --- 🎬 02. XNXX Video Details ---
+app.get('/api/xnxx/detail', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ status: false, message: "URL එක ලබා දෙන්න." });
+
+    try {
+        // මෙහිදී URL එක .tv එකක් බව සහතික කරගන්න
+        const targetUrl = url.replace('xnxx.com', 'xnxx.tv');
+        const { data } = await axios.get(targetUrl, { headers: { 'User-Agent': USER_AGENT } });
+        
+        const lowRes = data.match(/setVideoUrlLow\('(.*?)'\)/);
+        const highRes = data.match(/setVideoUrlHigh\('(.*?)'\)/);
+        const titleMatch = data.match(/setVideoTitle\('(.*?)'\)/);
+
+        if (lowRes || highRes) {
+            res.json({
+                status: true,
+                title: titleMatch ? titleMatch[1] : "Video Detail",
+                dl_links: {
+                    low: lowRes ? lowRes[1] : null,
+                    high: highRes ? highRes[1] : null
+                }
+            });
+        } else {
+            res.status(404).json({ status: false, message: "වීඩියෝ ලින්ක් සොයාගත නොහැක." });
+        }
+    } catch (e) {
+        res.status(500).json({ status: false, error: "Detail failed: " + e.message });
+    }
+});
+
 // --- 🔍 පියවර 01: මූවීස් සෙවීම (Search) ---
 app.get('/api/sinhalasub/search', async (req, res) => {
     const { q } = req.query;
@@ -279,6 +343,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
+
 
 
 
