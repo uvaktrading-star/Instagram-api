@@ -1,7 +1,9 @@
 const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
+const cheerio = require('cheerio');
 const app = express();
+const CryptoJS = require('crypto-js');
 
 app.use(cors());
 app.use(express.json());
@@ -182,4 +184,5 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
+
 
