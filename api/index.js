@@ -3,12 +3,107 @@ const express = require('express');
 const cors = require('cors');
 const cheerio = require('cheerio');
 const app = express();
-const CryptoJS = require('crypto-js');
 
 app.use(cors());
 app.use(express.json());
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+
+const HEADERS = {
+    'User-Agent': USER_AGENT,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Referer': 'https://sinhalasub.lk/'
+};
+
+// --- 🔍 පියවර 01: මූවීස් සෙවීම (Search) ---
+app.get('/api/sinhalasub/search', async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ status: false, message: "නමක් ලබා දෙන්න." });
+
+    try {
+        const response = await axios.get(`https://sinhalasub.lk/?s=${encodeURIComponent(q)}`, { headers: HEADERS, timeout: 15000 });
+        const $ = cheerio.load(response.data);
+        let results = [];
+
+        $('.display-item, .result-item, article').each((i, el) => {
+            const a = $(el).find('.item-box a, h2 a, h3 a, .title a').first();
+            const title = a.attr('title') || a.text().trim();
+            const link = a.attr('href');
+            const img = $(el).find('img').attr('src');
+
+            if (link && title && link.includes('sinhalasub.lk')) {
+                results.push({
+                    title: title.replace('Sinhala Subtitles | සිංහල උපසිරැසි සමඟ', '').trim(),
+                    url: link,
+                    image: img
+                });
+            }
+        });
+        res.json({ status: true, results });
+    } catch (e) {
+        res.status(500).json({ status: false, error: "සෙවිය නොහැකි විය: " + e.message });
+    }
+});
+
+// --- 🎬 පියවර 02: මූවී විස්තර සහ Direct Pixeldrain Links ---
+app.get('/api/sinhalasub/movie-details', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ status: false, message: "Movie URL එක ලබා දෙන්න." });
+
+    try {
+        const response = await axios.get(url, { headers: HEADERS, timeout: 15000 });
+        const $ = cheerio.load(response.data);
+
+        const title = $('.data h1').text().trim() || $('.entry-title').text().trim();
+        const poster = $('.poster img').attr('src') || $('meta[property="og:image"]').attr('content');
+        const rating = $('.details .imdb b').text().trim() || "N/A";
+
+        let tempLinks = [];
+        $('table tr').each((i, el) => {
+            const linkTag = $(el).find('a[href*="/links/"]');
+            if (linkTag.length > 0) {
+                tempLinks.push({
+                    quality: $(el).find('td').first().text().trim(),
+                    size: $(el).find('td:nth-child(2)').text().trim(),
+                    redirectUrl: linkTag.attr('href')
+                });
+            }
+        });
+
+        // 🚀 මෙතනදී තමයි හැම ලින්ක් එකක්ම Bypass කරලා Pixeldrain direct ලින්ක් හදන්නේ
+        const finalDownloads = await Promise.all(tempLinks.map(async (item) => {
+            try {
+                const resLink = await axios.get(item.redirectUrl, { 
+                    headers: { ...HEADERS, 'Referer': url }, 
+                    timeout: 8000 
+                });
+                
+                // HTML එක ඇතුළේ Pixeldrain ID එක තියෙනවද බලමු
+                const pixeldrainMatch = resLink.data.match(/https?:\/\/pixeldrain\.com\/u\/([a-zA-Z0-9]+)/);
+                
+                if (pixeldrainMatch) {
+                    const fileId = pixeldrainMatch[1];
+                    return {
+                        quality: `${item.quality} (${item.size})`,
+                        direct_url: `https://pixeldrain.com/api/file/${fileId}?download=1`
+                    };
+                }
+                return null;
+            } catch (err) { return null; }
+        }));
+
+        res.json({
+            status: true,
+            title: title.replace('Sinhala Subtitles | සිංහල උපසිරැසි සමඟ', '').trim(),
+            rating,
+            poster,
+            download_links: finalDownloads.filter(l => l !== null)
+        });
+
+    } catch (e) {
+        res.status(500).json({ status: false, error: "විස්තර ලබාගත නොහැක: " + e.message });
+    }
+});
 
 // --- 🎬 [NEW] TheNkiri Movie Scraper API ---
 // --- 🔍 1. Search API (ලිස්ට් එකක් ලබා ගැනීමට) ---
@@ -184,5 +279,6 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
+
 
 
