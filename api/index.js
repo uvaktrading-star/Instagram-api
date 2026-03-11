@@ -3,17 +3,58 @@ const express = require('express');
 const cors = require('cors');
 const cheerio = require('cheerio');
 const app = express();
+const crypto = require('crypto');
 
 app.use(cors());
 app.use(express.json());
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
-
+const KY = "C5D58EF67A7584E4A29F6C35BBC4EB12";
+const is = axios.create({ headers: { "content-type": "application/json", "origin": "https://yt.savetube.me", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0" }});
 const HEADERS = {
     'User-Agent': USER_AGENT,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Referer': 'https://sinhalasub.lk/'
 };
+
+async function decrypt(enc) {
+    const sr = Buffer.from(enc, "base64");
+    const key = Buffer.from(KY, "hex");
+    const iv = sr.slice(0, 16);
+    const data = sr.slice(16);
+    const dc = crypto.createDecipheriv("aes-128-cbc", key, iv);
+    const res = Buffer.concat([dc.update(data), dc.final()]);
+    return JSON.parse(res.toString());
+}
+
+app.get('/api/savetube', async (req, res) => {
+    const { url, format } = req.query; // format: mp3 or mp4
+    if (!url) return res.status(400).json({ error: "URL එක දීපන් මචං" });
+
+    try {
+        const id = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
+        const cdnRes = await is.get("https://media.savetube.vip/api/random-cdn");
+        const cdn = cdnRes.data.cdn;
+
+        const info = await is.post(`https://${cdn}/v2/info`, { url: `https://www.youtube.com/watch?v=${id}` });
+        const dec = await decrypt(info.data.data);
+
+        const dl = await is.post(`https://${cdn}/download`, {
+            id,
+            downloadType: format === 'mp3' ? 'audio' : 'video',
+            quality: format === 'mp3' ? '128' : '360',
+            key: dec.key
+        });
+
+        res.json({
+            status: true,
+            title: dec.title,
+            downloadUrl: dl.data.data.downloadUrl
+        });
+    } catch (e) {
+        res.status(500).json({ status: false, error: e.message });
+    }
+});
 
 // --- 🔍 01. XNXX Search API ---
 app.get('/api/xnxx/search', async (req, res) => {
@@ -343,7 +384,6 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
-
 
 
 
