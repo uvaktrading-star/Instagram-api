@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const cheerio = require('cheerio');
 const app = express();
+const yts = require('yt-search');
 const crypto = require('crypto');
 
 app.use(cors());
@@ -17,42 +18,66 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
-async function decrypt(enc) {
-    const sr = Buffer.from(enc, "base64");
-    const key = Buffer.from(KY, "hex");
-    const iv = sr.slice(0, 16);
-    const data = sr.slice(16);
-    const dc = crypto.createDecipheriv("aes-128-cbc", key, iv);
-    const res = Buffer.concat([dc.update(data), dc.final()]);
-    return JSON.parse(res.toString());
-}
-
-app.get('/api/savetube', async (req, res) => {
-    const { url, format } = req.query; // format: mp3 or mp4
-    if (!url) return res.status(400).json({ error: "URL එක දීපන් මචං" });
+app.get('/api/yt/search', async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.json({ status: false, error: "Search query එකක් දෙන්න." });
 
     try {
-        const id = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
-        const cdnRes = await is.get("https://media.savetube.vip/api/random-cdn");
-        const cdn = cdnRes.data.cdn;
+        const search = await yts(q);
+        const results = search.videos.slice(0, 10).map(v => ({
+            title: v.title,
+            url: v.url,
+            thumbnail: v.thumbnail,
+            timestamp: v.timestamp,
+            author: v.author.name
+        }));
 
-        const info = await is.post(`https://${cdn}/v2/info`, { url: `https://www.youtube.com/watch?v=${id}` });
-        const dec = await decrypt(info.data.data);
-
-        const dl = await is.post(`https://${cdn}/download`, {
-            id,
-            downloadType: format === 'mp3' ? 'audio' : 'video',
-            quality: format === 'mp3' ? '128' : '360',
-            key: dec.key
-        });
-
-        res.json({
-            status: true,
-            title: dec.title,
-            downloadUrl: dl.data.data.downloadUrl
-        });
+        res.json({ status: true, results });
     } catch (e) {
-        res.status(500).json({ status: false, error: e.message });
+        res.json({ status: false, error: "Search failed: " + e.message });
+    }
+});
+
+
+// --- YouTube MP3 Download (Proxy Method) ---
+app.get('/api/download', async (req, res) => {
+    const youtubeUrl = req.query.url;
+    if (!youtubeUrl) return res.json({ status: false, error: "URL එකක් ලබා දෙන්න" });
+
+    try {
+        // Video ID එක අරගැනීම
+        const videoId = youtubeUrl.split('be/')[1]?.split('?')[0] || 
+                        youtubeUrl.split('v=')[1]?.split('&')[0];
+        if (!videoId) return res.json({ status: false, error: "Invalid YouTube URL" });
+
+        const ajaxUrl = 'https://ssyoutube.online/wp-admin/admin-ajax.php';
+
+        // Step 1: MP3 ලින්ක් එක ලබා ගැනීම
+        const step1 = new URLSearchParams({ action: 'get_mp3_yt_option', videoId: videoId });
+        const res1 = await axios.post(ajaxUrl, step1);
+
+        if (!res1.data?.success || !res1.data.data.link) {
+            return res.json({ status: false, error: "Download link not found" });
+        }
+
+        const rawMp3Link = res1.data.data.link;
+
+        // Step 2: Proxy හරහා direct link එක ලබා ගැනීම
+        const step2 = new URLSearchParams({ action: 'mp3_yt_generic_proxy_ajax', targetUrl: rawMp3Link });
+        const res2 = await axios.post(ajaxUrl, step2);
+
+        if (res2.data?.success && res2.data.data.proxiedUrl) {
+            // කෙලින්ම ලින්ක් එක JSON එකක් විදිහට යවන්න (බෝට් එකෙන් මේක හසුරුවා ගන්න)
+            return res.json({
+                status: true,
+                title: res1.data.data.title,
+                download_url: res2.data.data.proxiedUrl
+            });
+        } else {
+            return res.json({ status: false, error: "Proxy generation failed" });
+        }
+    } catch (error) {
+        return res.json({ status: false, error: "Server error: " + error.message });
     }
 });
 
@@ -384,6 +409,5 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
-
 
 
