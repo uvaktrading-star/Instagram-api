@@ -8,7 +8,16 @@ const crypto = require('crypto');
 
 app.use(cors());
 app.use(express.json());
+//-----------------anime hevan----------------------
+const BASE_URL = 'https://animeheaven.me';
 
+const getHeaders = () => ({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Referer': BASE_URL,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Cookie': 'key=4290d2719374dd27249ad2886fb0076e;'
+});
+//------------------------------------------------------------
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
 const KY = "C5D58EF67A7584E4A29F6C35BBC4EB12";
 const is = axios.create({ headers: { "content-type": "application/json", "origin": "https://yt.savetube.me", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0" }});
@@ -18,6 +27,95 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
+app.get('/api/anime-search', async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q) return res.status(400).json({ success: false, error: 'Query required' });
+
+        const { data } = await axios.get(`${BASE_URL}/search.php?s=${encodeURIComponent(q)}`, { headers: getHeaders() });
+        const $ = cheerio.load(data);
+        const results = [];
+
+        $('div.info3.bc1 > div.similarimg').each((_, element) => {
+            const linkPath = $(element).find('div.p1 > a').attr('href');
+            const imgPath = $(element).find('img.coverimg').attr('src');
+            
+            if (linkPath) {
+                results.push({
+                    title: $(element).find('div.similarname.c > a').text().trim(),
+                    image: imgPath ? `${BASE_URL}/${imgPath}` : null,
+                    url: `${BASE_URL}/${linkPath}`,
+                    id: linkPath.split('=')[1]
+                });
+            }
+        });
+
+        res.json({ success: true, creator: "ZANTA-MD", count: results.length, data: results });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// 2️⃣ Get Anime Info & Episode List
+app.get('/api/anime-info', async (req, res) => {
+    try {
+        const { url } = req.query;
+        if (!url) return res.status(400).json({ success: false, error: 'URL required' });
+
+        const { data } = await axios.get(url, { headers: getHeaders() });
+        const $ = cheerio.load(data);
+
+        const title = $('div.infotitle.c').first().text().trim();
+        const image = $('img.posterimg').attr('src');
+        const description = $('div.infodes.c').text().trim();
+
+        const episodes = [];
+        $('div.linetitle2.c2 a.c').each((_, e) => {
+            const epId = $(e).attr('id');
+            const epNum = $(e).find('div.watch2.bc').text().trim() || (episodes.length + 1);
+            if (epId) {
+                episodes.push({
+                    episode: epNum,
+                    url: `${BASE_URL}/gate.php?id=${epId}`
+                });
+            }
+        });
+
+        res.json({
+            success: true,
+            creator: "ZANTA-MD",
+            result: { title, image: image ? `${BASE_URL}/${image}` : null, description, episodes }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/anime-download', async (req, res) => {
+    try {
+        const { url } = req.query; // Episode gate.php URL එක
+        if (!url) return res.status(400).json({ success: false, error: 'Episode URL required' });
+
+        const { data } = await axios.get(url, { headers: getHeaders() });
+        const $ = cheerio.load(data);
+        let dlLink = $('a[href*="video.mp4"]').attr('href');
+        if (!dlLink) {
+            const regex = /https:\/\/c[a-z]{1,2}\.animeheaven\.me\/video\.mp4\?[^"']+/;
+            const match = data.match(regex);
+            if (match) dlLink = match[0];
+        }
+        if (!dlLink) {
+            dlLink = $('video source').attr('src');
+        }
+
+        if (!dlLink) return res.status(404).json({ success: false, message: "Could not bypass. Site may be protected." });
+
+        res.json({ success: true, creator: "ZANTA-MD", download_url: dlLink });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+//-------------------------------------------------------------------
 app.get('/api/yt/search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.json({ status: false, error: "Search query එකක් දෙන්න." });
