@@ -41,10 +41,12 @@ app.get('/api/an1/download', async (req, res) => {
         const mainPage = await axios.get(url, { headers: HEADERS });
         const $main = cheerio.load(mainPage.data);
 
-        // $main පාවිච්චි කරලා data ටික ගමු
         const title = $main('h1').first().text().trim();
         
-        // Android Version එක ගන්න විදිහ (More stable way)
+        // --- Image URL එක මෙතනින් ගන්නවා ---
+        const image = $main('.app_view_first img').attr('src') || $main('img[itemprop="image"]').attr('src');
+        const imageUrl = image ? (image.startsWith('http') ? image : `https://an1.com${image}`) : "N/A";
+        
         let androidVersion = "N/A";
         $main('ul.spec li').each((i, el) => {
             const text = $main(el).text();
@@ -82,7 +84,8 @@ app.get('/api/an1/download', async (req, res) => {
                 info: {
                     title: title,
                     android: androidVersion,
-                    size: fileSize
+                    size: fileSize,
+                    thumbnail: imageUrl // අලුතින් එකතු කළ image url එක
                 },
                 download_url: finalLink
             });
