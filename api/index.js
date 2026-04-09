@@ -27,66 +27,72 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
-// --- 🎬 AN1.COM Download Link API ---
+// --- 🎮 AN1.COM Direct Download API ---
 app.get('/api/an1/download', async (req, res) => {
-    const { url } = req.query; // Search result එකෙන් ලැබුණු URL එක
-    if (!url) return res.status(400).json({ success: false, message: "Page URL එක ලබා දෙන්න." });
+    const { url } = req.query; // උදා: https://an1.com/7548-xp-hero-mod.html
+    if (!url) return res.status(400).json({ success: false, message: "URL එක ලබා දෙන්න." });
 
     try {
-        // පියවර 1: App පේජ් එකට ගිහින් "Go to Download" පේජ් එකේ ලින්ක් එක ගමු
-        const appPage = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
-        let $ = cheerio.load(appPage.data);
+        // 1. මුලින්ම ප්‍රධාන පේජ් එකට ගිහින් ඩවුන්ලෝඩ් බටන් එකේ ලින්ක් එක ගමු
+        const pageRes = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
+        let $ = cheerio.load(pageRes.data);
         
-        // ඩවුන්ලෝඩ් බටන් එකේ ලින්ක් එක හොයනවා (සාමාන්‍යයෙන් -dw.html ලින්ක් එක)
-        let downloadPageUrl = $('.download_page a').attr('href');
-        
-        if (!downloadPageUrl) {
-            // සමහර වෙලාවට කෙලින්ම URL එක ඇතුළේ තිබ්බොත්
-            downloadPageUrl = url.replace('.html', '-dw.html');
+        // ඩවුන්ලෝඩ් පේජ් එකේ ලින්ක් එක (සාමාන්‍යයෙන් -dw.html එක)
+        let dwPageUrl = $('.download_page a').attr('href');
+        if (!dwPageUrl) {
+            dwPageUrl = url.replace('.html', '-dw.html');
         }
 
-        // පියවර 2: ඩවුන්ලෝඩ් පේජ් එකට ගිහින් ඒකේ තියෙන script එක ඇතුළේ තියෙන JSON data එක ගමු
-        const downloadPage = await axios.get(downloadPageUrl, { 
+        // 2. ඩවුන්ලෝඩ් පේජ් එකට (තත්පර ගණන් යන පේජ් එකට) ගිහින් ඒකේ Source එක ගමු
+        const dwPageRes = await axios.get(dwPageUrl, { 
             headers: { 
                 'User-Agent': USER_AGENT,
                 'Referer': url 
             } 
         });
 
-        // මෙතන තමයි වැදගත්ම කොටස. Timer එකෙන් පස්සේ යන API එකට ඕන දත්ත script එකේ තියෙනවා.
-        // සාමාන්‍යයෙන් මේ සයිට් එකේ 'var download = { ... }' වගේ object එකක් තියෙනවා.
-        const scriptContent = downloadPage.data;
-        const dataMatch = scriptContent.match(/var\s+download\s*=\s*({.+?});/s);
+        const htmlSource = dwPageRes.data;
 
-        if (!dataMatch) {
-            return res.status(404).json({ success: false, message: "Download details not found in script." });
-        }
-
-        const downloadData = JSON.parse(dataMatch[1]);
-        /* downloadData එකේ සාමාන්‍යයෙන් මෙහෙම තියෙනවා:
-           { "id": 1584, "name": "hill-climb...", "key": "xxxx" }
+        /* සයිට් එකේ Source එකේ ලින්ක් එක තියෙන්නේ මෙහෙම:
+           window.location.href = "https://files.an1.net/....apk";
+           නැත්නම් JSON object එකක.
         */
 
-        // පියවර 3: Direct Download Link එක ගන්න API එකට request එකක් යවමු
-        // සටහන: සයිට් එකේ structure එක අනුව මේ endpoint එක වෙනස් වෙන්න පුළුවන්. 
-        // ඔයා එවපු network log එකේ 'files.an1.net' ලින්ක් එක තමයි අන්තිම එක.
-        
-        // බොහෝ වෙලාවට ලින්ක් එක හැදෙන්නේ මෙහෙමයි:
-        const directLink = `https://files.an1.net/${downloadData.name}`;
+        // Direct ලින්ක් එක Regex එකෙන් හොයමු
+        const linkRegex = /"link":"(https?:\/\/files\.an1\.net\/[^"]+)"/;
+        const match = htmlSource.match(linkRegex);
 
-        res.json({
-            success: true,
-            creator: "ZANTA-MD",
-            title: downloadData.name,
-            size: downloadData.size || "Unknown",
-            download_url: directLink
+        if (match && match[1]) {
+            // ලින්ක් එකේ තියෙන backslashes ( \ ) අයින් කරමු
+            const finalLink = match[1].replace(/\\/g, '');
+            
+            return res.json({
+                success: true,
+                creator: "ZANTA-MD",
+                title: finalLink.split('/').pop(),
+                download_url: finalLink
+            });
+        }
+
+        // ඉදිරියට තව විකල්පයක් (සමහර විට සයිට් එකේ structure එක වෙනස් වුණොත්)
+        const altRegex = /window\.location\.href\s*=\s*['"](https?:\/\/files\.an1\.net\/[^'"]+)['"]/;
+        const altMatch = htmlSource.match(altRegex);
+
+        if (altMatch && altMatch[1]) {
+            return res.json({
+                success: true,
+                creator: "ZANTA-MD",
+                download_url: altMatch[1]
+            });
+        }
+
+        res.status(404).json({ 
+            success: false, 
+            message: "Direct download link එක සොයාගත නොහැකි විය. Source එක වෙනස් වී ඇත." 
         });
 
     } catch (e) {
-        res.status(500).json({ 
-            success: false, 
-            error: "AN1 Download failed: " + e.message 
-        });
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
