@@ -29,58 +29,42 @@ const HEADERS = {
 
 // --- 🎮 AN1.COM Direct Download API ---
 app.get('/api/an1/download', async (req, res) => {
-    const { url } = req.query; // උදා: https://an1.com/7548-xp-hero-mod.html
+    const { url } = req.query; 
     if (!url) return res.status(400).json({ success: false, message: "URL එක ලබා දෙන්න." });
 
     try {
         const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-        // --- පියවර 1: ප්‍රධාන පේජ් එකට ගිහින් Download පේජ් එකේ ලින්ක් එක ගමු ---
+        // 1. ප්‍රධාන පේජ් එකට ගිහින් download පේජ් එකේ ලින්ක් එක ගමු
         const mainPage = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
         const $main = cheerio.load(mainPage.data);
         
-        // පේජ් එකේ තියෙන Download බටන් එකේ ලින්ක් එක ගන්නවා
-        let dwPath = $main('.spec_addon a.btn-green').attr('href') || $main('.download_line').attr('href');
+        let dwPath = $main('.spec_addon a.btn-green').attr('href');
+        if (!dwPath) dwPath = url.replace('.html', '-dw.html');
 
-        // බටන් එක හම්බුනේ නැත්නම් URL එකෙන් හදාගන්නවා
-        if (!dwPath) {
-            dwPath = url.replace('.html', '-dw.html');
-        }
-
-        // සම්පූර්ණ URL එක හදාගමු
         const downloadPageUrl = dwPath.startsWith('http') ? dwPath : `https://an1.com${dwPath}`;
 
-        // --- පියවර 2: Download පේජ් එකට (Timer එක තියෙන පේජ් එකට) ගිහින් Direct Link එක ගමු ---
+        // 2. Download පේජ් එකට (Timer එක තියෙන එකට) ගිහින් Game Link එක ගමු
         const downloadPage = await axios.get(downloadPageUrl, {
             headers: {
                 'User-Agent': USER_AGENT,
-                'Referer': url // Referer එක අනිවාර්යයි
+                'Referer': url 
             }
         });
 
         const $dw = cheerio.load(downloadPage.data);
 
-        // ඔයා එවපු Source එකේ තියෙන 'pre_download' id එක හරහා ලින්ක් එක ගන්නවා
-        const finalDirectLink = $dw('#pre_download').attr('href');
+        // --- මෙන්න මෙතනයි වෙනස තියෙන්නේ ---
+        // අපි කෙලින්ම id එක පාවිච්චි කරලා ගේම් එකේ ලින්ක් එක විතරක් ටාගට් කරනවා
+        const gameLink = $dw('a#pre_download').attr('href');
 
-        if (finalDirectLink) {
+        if (gameLink) {
             return res.json({
                 success: true,
                 creator: "ZANTA-MD",
-                title: $dw('.title').text().trim() || "Unknown Title",
-                size: $dw('.download_line .size').text().trim() || "Unknown",
-                download_url: finalDirectLink
+                title: $dw('.title').text().trim(),
+                download_url: gameLink // දැන් මෙතනට එන්නේ නියම direct link එක
             });
-        } else {
-            // බැරි වෙලාවත් ID එකෙන් ලින්ක් එක හම්බුනේ නැත්නම් Regex එක පාවිච්චි කරමු
-            const linkMatch = downloadPage.data.match(/href="(https?:\/\/files\.an1\.net\/[^"]+)"/);
-            if (linkMatch) {
-                return res.json({
-                    success: true,
-                    creator: "ZANTA-MD",
-                    download_url: linkMatch[1]
-                });
-            }
         }
 
         res.status(404).json({
