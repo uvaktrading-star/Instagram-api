@@ -33,62 +33,59 @@ app.get('/api/an1/download', async (req, res) => {
     if (!url) return res.status(400).json({ success: false, message: "URL එක ලබා දෙන්න." });
 
     try {
-        // 1. මුලින්ම ප්‍රධාන පේජ් එකට ගිහින් ඩවුන්ලෝඩ් බටන් එකේ ලින්ක් එක ගමු
-        const pageRes = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
-        let $ = cheerio.load(pageRes.data);
+        const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+        // --- පියවර 1: ප්‍රධාන පේජ් එකට ගිහින් Download පේජ් එකේ ලින්ක් එක ගමු ---
+        const mainPage = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
+        const $main = cheerio.load(mainPage.data);
         
-        // ඩවුන්ලෝඩ් පේජ් එකේ ලින්ක් එක (සාමාන්‍යයෙන් -dw.html එක)
-        let dwPageUrl = $('.download_page a').attr('href');
-        if (!dwPageUrl) {
-            dwPageUrl = url.replace('.html', '-dw.html');
+        // පේජ් එකේ තියෙන Download බටන් එකේ ලින්ක් එක ගන්නවා
+        let dwPath = $main('.spec_addon a.btn-green').attr('href') || $main('.download_line').attr('href');
+
+        // බටන් එක හම්බුනේ නැත්නම් URL එකෙන් හදාගන්නවා
+        if (!dwPath) {
+            dwPath = url.replace('.html', '-dw.html');
         }
 
-        // 2. ඩවුන්ලෝඩ් පේජ් එකට (තත්පර ගණන් යන පේජ් එකට) ගිහින් ඒකේ Source එක ගමු
-        const dwPageRes = await axios.get(dwPageUrl, { 
-            headers: { 
+        // සම්පූර්ණ URL එක හදාගමු
+        const downloadPageUrl = dwPath.startsWith('http') ? dwPath : `https://an1.com${dwPath}`;
+
+        // --- පියවර 2: Download පේජ් එකට (Timer එක තියෙන පේජ් එකට) ගිහින් Direct Link එක ගමු ---
+        const downloadPage = await axios.get(downloadPageUrl, {
+            headers: {
                 'User-Agent': USER_AGENT,
-                'Referer': url 
-            } 
+                'Referer': url // Referer එක අනිවාර්යයි
+            }
         });
 
-        const htmlSource = dwPageRes.data;
+        const $dw = cheerio.load(downloadPage.data);
 
-        /* සයිට් එකේ Source එකේ ලින්ක් එක තියෙන්නේ මෙහෙම:
-           window.location.href = "https://files.an1.net/....apk";
-           නැත්නම් JSON object එකක.
-        */
+        // ඔයා එවපු Source එකේ තියෙන 'pre_download' id එක හරහා ලින්ක් එක ගන්නවා
+        const finalDirectLink = $dw('#pre_download').attr('href');
 
-        // Direct ලින්ක් එක Regex එකෙන් හොයමු
-        const linkRegex = /"link":"(https?:\/\/files\.an1\.net\/[^"]+)"/;
-        const match = htmlSource.match(linkRegex);
-
-        if (match && match[1]) {
-            // ලින්ක් එකේ තියෙන backslashes ( \ ) අයින් කරමු
-            const finalLink = match[1].replace(/\\/g, '');
-            
+        if (finalDirectLink) {
             return res.json({
                 success: true,
                 creator: "ZANTA-MD",
-                title: finalLink.split('/').pop(),
-                download_url: finalLink
+                title: $dw('.title').text().trim() || "Unknown Title",
+                size: $dw('.download_line .size').text().trim() || "Unknown",
+                download_url: finalDirectLink
             });
+        } else {
+            // බැරි වෙලාවත් ID එකෙන් ලින්ක් එක හම්බුනේ නැත්නම් Regex එක පාවිච්චි කරමු
+            const linkMatch = downloadPage.data.match(/href="(https?:\/\/files\.an1\.net\/[^"]+)"/);
+            if (linkMatch) {
+                return res.json({
+                    success: true,
+                    creator: "ZANTA-MD",
+                    download_url: linkMatch[1]
+                });
+            }
         }
 
-        // ඉදිරියට තව විකල්පයක් (සමහර විට සයිට් එකේ structure එක වෙනස් වුණොත්)
-        const altRegex = /window\.location\.href\s*=\s*['"](https?:\/\/files\.an1\.net\/[^'"]+)['"]/;
-        const altMatch = htmlSource.match(altRegex);
-
-        if (altMatch && altMatch[1]) {
-            return res.json({
-                success: true,
-                creator: "ZANTA-MD",
-                download_url: altMatch[1]
-            });
-        }
-
-        res.status(404).json({ 
-            success: false, 
-            message: "Direct download link එක සොයාගත නොහැකි විය. Source එක වෙනස් වී ඇත." 
+        res.status(404).json({
+            success: false,
+            message: "Direct download link එක සොයාගත නොහැකි විය."
         });
 
     } catch (e) {
