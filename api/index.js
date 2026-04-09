@@ -33,44 +33,57 @@ app.get('/api/an1/download', async (req, res) => {
     if (!url) return res.status(400).json({ success: false, message: "URL එක ලබා දෙන්න." });
 
     try {
-        const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        const HEADERS = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://an1.com/'
+        };
 
-        // 1. ප්‍රධාන පේජ් එකට ගිහින් download පේජ් එකේ ලින්ක් එක ගමු
-        const mainPage = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
+        // 1. ප්‍රධාන පේජ් එකට ගිහින් විස්තර (Info) සහ Download පේජ් එකේ ලින්ක් එක ගමු
+        const mainPage = await axios.get(url, { headers: HEADERS });
         const $main = cheerio.load(mainPage.data);
-        
+
+        // මෙතනින් තමයි Android version, Size වගේ දේවල් ගන්නේ (image_9cc0c0.jpg අනුව)
+        const title = $main('h1[itemprop="headline"]').text().trim();
+        const androidVersion = $main('ul.spec li').filter((i, el) => $(el).text().includes('Android')).text().replace('Android', '').trim();
+        const appVersion = $main('ul.spec li').filter((i, el) => $(el).text().includes('Version')).text().replace('Version:', '').trim();
+        const fileSize = $main('ul.spec li span[itemprop="fileSize"]').text().trim();
+
         let dwPath = $main('.spec_addon a.btn-green').attr('href');
-        if (!dwPath) dwPath = url.replace('.html', '-dw.html');
+        if (!dwPath) dwPath = url.replace('.html', '-dw.html').replace('https://an1.com', '');
 
-        const downloadPageUrl = dwPath.startsWith('http') ? dwPath : `https://an1.com${dwPath}`;
+        const downloadPageUrl = `https://an1.com${dwPath}`;
 
-        // 2. Download පේජ් එකට (Timer එක තියෙන එකට) ගිහින් Game Link එක ගමු
+        // 2. Download පේජ් එකට ගිහින් Direct Link එක ගමු
         const downloadPage = await axios.get(downloadPageUrl, {
-            headers: {
-                'User-Agent': USER_AGENT,
-                'Referer': url 
-            }
+            headers: { ...HEADERS, 'Referer': url }
         });
 
         const $dw = cheerio.load(downloadPage.data);
+        let finalLink = $dw('a#pre_download').attr('href');
 
-        // --- මෙන්න මෙතනයි වෙනස තියෙන්නේ ---
-        // අපි කෙලින්ම id එක පාවිච්චි කරලා ගේම් එකේ ලින්ක් එක විතරක් ටාගට් කරනවා
-        const gameLink = $dw('a#pre_download').attr('href');
+        if (!finalLink) {
+            const regex = /https:\/\/files\.an1\.net\/[^"'\s<>]+/g;
+            const matches = downloadPage.data.match(regex);
+            if (matches) {
+                finalLink = matches.find(l => !l.includes('an1store.apk'));
+            }
+        }
 
-        if (gameLink) {
+        if (finalLink) {
             return res.json({
                 success: true,
                 creator: "ZANTA-MD",
-                title: $dw('.title').text().trim(),
-                download_url: gameLink // දැන් මෙතනට එන්නේ නියම direct link එක
+                info: {
+                    title: title,
+                    version: appVersion || "N/A",
+                    android: androidVersion || "Varies with device",
+                    size: fileSize || "Unknown"
+                },
+                download_url: finalLink
             });
         }
 
-        res.status(404).json({
-            success: false,
-            message: "Direct download link එක සොයාගත නොහැකි විය."
-        });
+        res.status(404).json({ success: false, message: "Direct link එක සොයාගත නොහැකි විය." });
 
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
