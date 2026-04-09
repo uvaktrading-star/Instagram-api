@@ -27,6 +27,59 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
+app.get('/api/an1/search', async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ success: false, message: "Search query එකක් ලබා දෙන්න." });
+
+    try {
+        // an1.com සයිට් එකේ search query එක යන්නේ POST request එකක් විදිහට හෝ 
+        // URL query parameters විදිහටයි. මෙන්න සරලම ක්‍රමය:
+        const searchUrl = `https://an1.com/?story=${encodeURIComponent(q)}&do=search&subaction=search`;
+        
+        const response = await axios.get(searchUrl, {
+            headers: {
+                'User-Agent': USER_AGENT,
+                'Referer': 'https://an1.com/'
+            }
+        });
+
+        const $ = cheerio.load(response.data);
+        let results = [];
+
+        // සයිට් එකේ 'item' class එක සහිත div තුළ තමයි apps ලිස්ට් එක තියෙන්නේ
+        $('.app_list .item').each((i, el) => {
+            const title = $(el).find('.cont .data .name span').text().trim();
+            const link = $(el).find('.cont .data .name a').attr('href');
+            const img = $(el).find('.img img').attr('src');
+            const developer = $(el).find('.developer').text().trim();
+            const rating = $(el).find('.meta .rating_num').text().trim() || "N/A";
+
+            if (link && title) {
+                results.push({
+                    title: title,
+                    url: link,
+                    thumbnail: img.startsWith('http') ? img : `https://an1.com${img}`,
+                    developer: developer,
+                    rating: rating
+                });
+            }
+        });
+
+        res.json({ 
+            success: true, 
+            creator: "ZANTA-MD", 
+            count: results.length, 
+            results: results 
+        });
+
+    } catch (e) {
+        res.status(500).json({ 
+            success: false, 
+            error: "AN1 Search failed: " + e.message 
+        });
+    }
+});
+
 app.get('/api/anime-search', async (req, res) => {
     try {
         const { q } = req.query;
