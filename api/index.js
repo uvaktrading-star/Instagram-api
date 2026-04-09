@@ -38,22 +38,28 @@ app.get('/api/an1/download', async (req, res) => {
             'Referer': 'https://an1.com/'
         };
 
-        // 1. ප්‍රධාන පේජ් එකට ගිහින් විස්තර (Info) සහ Download පේජ් එකේ ලින්ක් එක ගමු
         const mainPage = await axios.get(url, { headers: HEADERS });
         const $main = cheerio.load(mainPage.data);
 
-        // මෙතනින් තමයි Android version, Size වගේ දේවල් ගන්නේ (image_9cc0c0.jpg අනුව)
-        const title = $main('h1[itemprop="headline"]').text().trim();
-        const androidVersion = $main('ul.spec li').filter((i, el) => $(el).text().includes('Android')).text().replace('Android', '').trim();
-        const appVersion = $main('ul.spec li').filter((i, el) => $(el).text().includes('Version')).text().replace('Version:', '').trim();
-        const fileSize = $main('ul.spec li span[itemprop="fileSize"]').text().trim();
+        // $main පාවිච්චි කරලා data ටික ගමු
+        const title = $main('h1').first().text().trim();
+        
+        // Android Version එක ගන්න විදිහ (More stable way)
+        let androidVersion = "N/A";
+        $main('ul.spec li').each((i, el) => {
+            const text = $main(el).text();
+            if (text.includes('Android')) {
+                androidVersion = text.replace('Android', '').trim();
+            }
+        });
 
-        let dwPath = $main('.spec_addon a.btn-green').attr('href');
+        const fileSize = $main('span[itemprop="fileSize"]').text().trim() || "N/A";
+
+        let dwPath = $main('.spec_addon a.btn-green').attr('href') || $main('.download_line').attr('href');
         if (!dwPath) dwPath = url.replace('.html', '-dw.html').replace('https://an1.com', '');
 
-        const downloadPageUrl = `https://an1.com${dwPath}`;
+        const downloadPageUrl = dwPath.startsWith('http') ? dwPath : `https://an1.com${dwPath}`;
 
-        // 2. Download පේජ් එකට ගිහින් Direct Link එක ගමු
         const downloadPage = await axios.get(downloadPageUrl, {
             headers: { ...HEADERS, 'Referer': url }
         });
@@ -75,21 +81,19 @@ app.get('/api/an1/download', async (req, res) => {
                 creator: "ZANTA-MD",
                 info: {
                     title: title,
-                    version: appVersion || "N/A",
-                    android: androidVersion || "Varies with device",
-                    size: fileSize || "Unknown"
+                    android: androidVersion,
+                    size: fileSize
                 },
                 download_url: finalLink
             });
         }
 
-        res.status(404).json({ success: false, message: "Direct link එක සොයාගත නොහැකි විය." });
+        res.status(404).json({ success: false, message: "Link not found" });
 
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
-
 app.get('/api/an1/search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ success: false, message: "Search query එකක් ලබා දෙන්න." });
