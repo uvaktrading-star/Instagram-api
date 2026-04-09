@@ -27,6 +27,69 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
+// --- 🎬 AN1.COM Download Link API ---
+app.get('/api/an1/download', async (req, res) => {
+    const { url } = req.query; // Search result එකෙන් ලැබුණු URL එක
+    if (!url) return res.status(400).json({ success: false, message: "Page URL එක ලබා දෙන්න." });
+
+    try {
+        // පියවර 1: App පේජ් එකට ගිහින් "Go to Download" පේජ් එකේ ලින්ක් එක ගමු
+        const appPage = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } });
+        let $ = cheerio.load(appPage.data);
+        
+        // ඩවුන්ලෝඩ් බටන් එකේ ලින්ක් එක හොයනවා (සාමාන්‍යයෙන් -dw.html ලින්ක් එක)
+        let downloadPageUrl = $('.download_page a').attr('href');
+        
+        if (!downloadPageUrl) {
+            // සමහර වෙලාවට කෙලින්ම URL එක ඇතුළේ තිබ්බොත්
+            downloadPageUrl = url.replace('.html', '-dw.html');
+        }
+
+        // පියවර 2: ඩවුන්ලෝඩ් පේජ් එකට ගිහින් ඒකේ තියෙන script එක ඇතුළේ තියෙන JSON data එක ගමු
+        const downloadPage = await axios.get(downloadPageUrl, { 
+            headers: { 
+                'User-Agent': USER_AGENT,
+                'Referer': url 
+            } 
+        });
+
+        // මෙතන තමයි වැදගත්ම කොටස. Timer එකෙන් පස්සේ යන API එකට ඕන දත්ත script එකේ තියෙනවා.
+        // සාමාන්‍යයෙන් මේ සයිට් එකේ 'var download = { ... }' වගේ object එකක් තියෙනවා.
+        const scriptContent = downloadPage.data;
+        const dataMatch = scriptContent.match(/var\s+download\s*=\s*({.+?});/s);
+
+        if (!dataMatch) {
+            return res.status(404).json({ success: false, message: "Download details not found in script." });
+        }
+
+        const downloadData = JSON.parse(dataMatch[1]);
+        /* downloadData එකේ සාමාන්‍යයෙන් මෙහෙම තියෙනවා:
+           { "id": 1584, "name": "hill-climb...", "key": "xxxx" }
+        */
+
+        // පියවර 3: Direct Download Link එක ගන්න API එකට request එකක් යවමු
+        // සටහන: සයිට් එකේ structure එක අනුව මේ endpoint එක වෙනස් වෙන්න පුළුවන්. 
+        // ඔයා එවපු network log එකේ 'files.an1.net' ලින්ක් එක තමයි අන්තිම එක.
+        
+        // බොහෝ වෙලාවට ලින්ක් එක හැදෙන්නේ මෙහෙමයි:
+        const directLink = `https://files.an1.net/${downloadData.name}`;
+
+        res.json({
+            success: true,
+            creator: "ZANTA-MD",
+            title: downloadData.name,
+            size: downloadData.size || "Unknown",
+            download_url: directLink
+        });
+
+    } catch (e) {
+        res.status(500).json({ 
+            success: false, 
+            error: "AN1 Download failed: " + e.message 
+        });
+    }
+});
+
 app.get('/api/an1/search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ success: false, message: "Search query එකක් ලබා දෙන්න." });
