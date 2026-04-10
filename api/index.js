@@ -27,6 +27,166 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
+// --- 🎬 Moviesublk Search API ---
+app.get('/api/moviesublk/search', async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ status: false, message: "සෙවිය යුතු නම ඇතුළත් කරන්න." });
+
+    try {
+        // Blogger search URL එක
+        const searchUrl = `https://www.moviesublk.com/search?q=${encodeURIComponent(q)}`;
+        
+        const response = await axios.get(searchUrl, {
+            headers: {
+                'User-Agent': USER_AGENT,
+                'Referer': 'https://www.moviesublk.com/'
+            }
+        });
+
+        const $ = cheerio.load(response.data);
+        let results = [];
+
+        // Screenshot එකේ තියෙන 's-card' class එක අනුව data ගන්නවා
+        $('.s-card').each((i, el) => {
+            const title = $(el).find('.s-title').text().trim();
+            const link = $(el).attr('onclick')?.match(/'([^']+)'/)?.[1] || "";
+            const img = $(el).find('.s-thumb').attr('src');
+            const type = $(el).find('.s-badge').text().trim() || "MOVIE";
+
+            if (title && link) {
+                results.push({
+                    title: title,
+                    url: link,
+                    thumbnail: img,
+                    type: type
+                });
+            }
+        });
+
+        // නිවැරදි ප්‍රතිඵල ලැබුණේ නැත්නම් alternate selector එකක් බලමු (සාමාන්‍ය Blogger posts සඳහා)
+        if (results.length === 0) {
+            $('.post-outer, article').each((i, el) => {
+                const title = $(el).find('.entry-title a, .post-title a').text().trim();
+                const link = $(el).find('.entry-title a, .post-title a').attr('href');
+                const img = $(el).find('img').attr('src');
+
+                if (title && link) {
+                    results.push({
+                        title: title,
+                        url: link,
+                        thumbnail: img,
+                        type: "MOVIE"
+                    });
+                }
+            });
+        }
+
+        res.json({
+            status: true,
+            creator: "ZANTA-MD",
+            count: results.length,
+            results: results
+        });
+
+    } catch (e) {
+        res.status(500).json({
+            status: false,
+            error: "Moviesublk Search failed: " + e.message
+        });
+    }
+});
+
+app.get('/api/moviesublk/dl', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ status: false, message: "URL එක ලබා දෙන්න." });
+
+    try {
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': 'https://www.moviesublk.com/'
+            }
+        });
+
+        const html = response.data;
+        const $ = cheerio.load(html); // 👈 මේ පේළිය තමයි අඩුවෙලා තිබුණේ ($ define කරන්නේ මෙතනින්)
+        
+        const title = $('title').text().replace(' - MovieSubLK', '').trim();
+
+        // 🔍 Google Drive ID එක සොයා ගැනීම
+        const gdriveRegex = /https:\/\/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=|file\/d\/)([a-zA-Z0-9_-]+)/;
+        const match = html.match(gdriveRegex);
+
+        if (!match || !match[1]) {
+            return res.status(404).json({ status: false, message: "Google Drive ID එක සොයාගත නොහැකි විය." });
+        }
+
+        const fileId = match[1];
+        const gDriveBase = `https://drive.google.com/uc?export=download&id=${fileId}`;
+        
+        let finalLink = gDriveBase;
+
+        try {
+            // Virus warning එක bypass කිරීමට confirm code එක ලබා ගැනීම
+            const gRes = await axios.get(gDriveBase, { timeout: 10000 });
+            const confirmMatch = gRes.data.match(/confirm=([a-zA-Z0-9_]+)/);
+            
+            if (confirmMatch) {
+                finalLink = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${fileId}`;
+            }
+        } catch (err) {
+            finalLink = gDriveBase;
+        }
+
+        res.json({
+            status: true,
+            creator: "ZANTA-MD",
+            title: title,
+            file_id: fileId,
+            gdrive_url: `https://drive.google.com/file/d/${fileId}/view`,
+            direct_download_url: finalLink
+        });
+
+    } catch (e) {
+        res.status(500).json({ status: false, error: "Link extraction failed: " + e.message });
+    }
+});
+
+app.get('/api/gdrive/v3', async (req, res) => {
+    const { id } = req.query;
+    const API_KEY = 'AIzaSyDfaxjwWYFZTO9rba0vBaPKfp8_MxSVBFQ';
+
+    if (!id) return res.status(400).json({ status: false, message: "File ID එක ලබා දෙන්න." });
+
+    // Google Drive v3 API එක හරහා ෆයිල් එකේ දත්ත ලබා ගැනීම
+    // alt=media කියන එකෙන් තමයි Direct Download එක ලැබෙන්නේ
+    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${API_KEY}`;
+
+    try {
+        // බෝට් එකට යවන්න ලේසි වෙන්න අපි මෙතනදීත් Stream කරන එක වඩාත් හොඳයි
+        const response = await axios({
+            method: 'get',
+            url: downloadUrl,
+            responseType: 'stream'
+        });
+
+        // Headers සකස් කිරීම
+        res.setHeader('Content-Disposition', `attachment; filename="ZANTA-MD-File"`);
+        res.setHeader('Content-Type', response.headers['content-type']);
+
+        // කෙලින්ම stream එක යැවීම
+        response.data.pipe(res);
+
+    } catch (e) {
+        // මොකක් හරි වැරදුනොත් (උදා: File එක Private නම්)
+        res.status(500).json({ 
+            status: false, 
+            message: "API එක හරහා ෆයිල් එක ලබාගත නොහැකි විය. ෆයිල් එක 'Anyone with the link' ලෙස public කර ඇති දැයි බලන්න.",
+            error: e.message 
+        });
+    }
+});
+
 // --- 🎮 AN1.COM Direct Download API ---
 app.get('/api/an1/download', async (req, res) => {
     const { url } = req.query; 
