@@ -109,11 +109,38 @@ app.get('/api/moviesublk/dl', async (req, res) => {
         });
 
         const html = response.data;
-        const $ = cheerio.load(html); // 👈 මේ පේළිය තමයි අඩුවෙලා තිබුණේ ($ define කරන්නේ මෙතනින්)
+        const $ = cheerio.load(html);
         
+        // --- 1. මූලික තොරතුරු ---
         const title = $('title').text().replace(' - MovieSubLK', '').trim();
+        const image = $('.post-body.entry-content img').first().attr('src') || "";
 
-        // 🔍 Google Drive ID එක සොයා ගැනීම
+        const movieDetails = {};
+
+        // 🔍 ක්‍රමය A: <ul> <li> ඇතුළේ විස්තර තිබේ නම් (උදා: Hotel Transylvania)
+        $('.post-body.entry-content ul li').each((i, el) => {
+            const text = $(el).text();
+            if (text.includes(':')) {
+                const parts = text.split(':');
+                const key = parts[0].trim();
+                const value = parts[1].trim();
+                if (key && value) movieDetails[key] = value;
+            }
+        });
+
+        // 🔍 ක්‍රමය B: .sd-info ඇතුළේ විස්තර තිබේ නම් (උදා: Scooby-Doo / Heidi)
+        // මේකෙදි අපි කරන්නේ strong ටැග් එකේ තියෙන text එක key එක විදිහට අරන් ඊළඟට තියෙන text එක value එක විදිහට ගන්න එකයි
+        if (Object.keys(movieDetails).length === 0) {
+            $('.sd-info strong').each((i, el) => {
+                const key = $(el).text().replace(':', '').trim();
+                const value = el.nextSibling ? $(el.nextSibling).text().trim() : "";
+                if (key && value) {
+                    movieDetails[key] = value;
+                }
+            });
+        }
+
+        // --- 2. Google Drive ID එක සොයා ගැනීම ---
         const gdriveRegex = /https:\/\/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=|file\/d\/)([a-zA-Z0-9_-]+)/;
         const match = html.match(gdriveRegex);
 
@@ -126,11 +153,10 @@ app.get('/api/moviesublk/dl', async (req, res) => {
         
         let finalLink = gDriveBase;
 
+        // --- 3. Bypass 'Download anyway' Warning ---
         try {
-            // Virus warning එක bypass කිරීමට confirm code එක ලබා ගැනීම
             const gRes = await axios.get(gDriveBase, { timeout: 10000 });
             const confirmMatch = gRes.data.match(/confirm=([a-zA-Z0-9_]+)/);
-            
             if (confirmMatch) {
                 finalLink = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${fileId}`;
             }
@@ -138,10 +164,13 @@ app.get('/api/moviesublk/dl', async (req, res) => {
             finalLink = gDriveBase;
         }
 
+        // --- 4. අවසාන Response එක ---
         res.json({
             status: true,
             creator: "ZANTA-MD",
             title: title,
+            image: image,
+            movie_info: movieDetails, 
             file_id: fileId,
             gdrive_url: `https://drive.google.com/file/d/${fileId}/view`,
             direct_download_url: finalLink
