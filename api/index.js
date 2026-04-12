@@ -181,40 +181,6 @@ app.get('/api/moviesublk/dl', async (req, res) => {
     }
 });
 
-app.get('/api/gdrive/v3', async (req, res) => {
-    const { id } = req.query;
-    const API_KEY = 'AIzaSyDfaxjwWYFZTO9rba0vBaPKfp8_MxSVBFQ';
-
-    if (!id) return res.status(400).json({ status: false, message: "File ID එක ලබා දෙන්න." });
-
-    // Google Drive v3 API එක හරහා ෆයිල් එකේ දත්ත ලබා ගැනීම
-    // alt=media කියන එකෙන් තමයි Direct Download එක ලැබෙන්නේ
-    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${API_KEY}`;
-
-    try {
-        // බෝට් එකට යවන්න ලේසි වෙන්න අපි මෙතනදීත් Stream කරන එක වඩාත් හොඳයි
-        const response = await axios({
-            method: 'get',
-            url: downloadUrl,
-            responseType: 'stream'
-        });
-
-        // Headers සකස් කිරීම
-        res.setHeader('Content-Disposition', `attachment; filename="ZANTA-MD-File"`);
-        res.setHeader('Content-Type', response.headers['content-type']);
-
-        // කෙලින්ම stream එක යැවීම
-        response.data.pipe(res);
-
-    } catch (e) {
-        // මොකක් හරි වැරදුනොත් (උදා: File එක Private නම්)
-        res.status(500).json({ 
-            status: false, 
-            message: "API එක හරහා ෆයිල් එක ලබාගත නොහැකි විය. ෆයිල් එක 'Anyone with the link' ලෙස public කර ඇති දැයි බලන්න.",
-            error: e.message 
-        });
-    }
-});
 
 // --- 🎮 AN1.COM Direct Download API ---
 app.get('/api/an1/download', async (req, res) => {
