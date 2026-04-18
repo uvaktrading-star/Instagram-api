@@ -96,6 +96,89 @@ app.get('/api/moviesublk/search', async (req, res) => {
     }
 });
 
+//------MOVIE SUBLK TV SHOW SEARCH-------
+app.get('/api/tvshow/dl', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ status: false, message: "URL එක ලබා දෙන්න." });
+
+    try {
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': 'https://www.moviesublk.com/'
+            }
+        });
+
+        const html = response.data;
+        const $ = cheerio.load(html);
+        
+        const title = $('title').text().replace(' - MovieSubLK', '').trim();
+        const image = $('.post-body.entry-content img').first().attr('src') || "";
+
+        // --- 1. Episode Grid එක පරීක්ෂා කිරීම (TV Show Check) ---
+        const epGrid = $('#ep-grid, .nav-grid'); // Screenshot එකේ තියෙන ID එක
+        
+        if (epGrid.length > 0) {
+            let episodes = [];
+            epGrid.find('button, a').each((i, el) => {
+                const epTitle = $(el).text().trim();
+                // සමහර විට Episode ලින්ක් එක තිබෙන්නේ button එකේ onClick එකේ හෝ a tag එකේ href එකේ
+                const epLink = $(el).attr('href') || $(el).attr('onclick')?.match(/'([^']+)'/)?.[1] || "";
+
+                if (epTitle) {
+                    episodes.push({
+                        episode: epTitle,
+                        url: epLink.startsWith('http') ? epLink : `https://www.moviesublk.com${epLink}`
+                    });
+                }
+            });
+
+            return res.json({
+                status: true,
+                type: "TV_SHOW",
+                creator: "ZANTA-MD",
+                title: title,
+                image: image,
+                total_episodes: episodes.length,
+                episodes: episodes
+            });
+        }
+
+        // --- 2. සාමාන්‍ය Movie එකක් නම් (පැරණි Logic එක) ---
+        const movieDetails = {};
+        $('.post-body.entry-content ul li').each((i, el) => {
+            const text = $(el).text();
+            if (text.includes(':')) {
+                const parts = text.split(':');
+                movieDetails[parts[0].trim()] = parts[1].trim();
+            }
+        });
+
+        const gdriveRegex = /https:\/\/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=|file\/d\/)([a-zA-Z0-9_-]+)/;
+        const match = html.match(gdriveRegex);
+
+        if (!match || !match[1]) {
+            return res.json({ status: true, type: "MOVIE", title: title, message: "Direct download link not found. Manual check required." });
+        }
+
+        const fileId = match[1];
+        const finalLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+        res.json({
+            status: true,
+            type: "MOVIE",
+            creator: "ZANTA-MD",
+            title: title,
+            image: image,
+            movie_info: movieDetails, 
+            direct_download_url: finalLink
+        });
+
+    } catch (e) {
+        res.status(500).json({ status: false, error: "Extraction failed: " + e.message });
+    }
+});
+
 app.get('/api/moviesublk/dl', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).json({ status: false, message: "URL එක ලබා දෙන්න." });
