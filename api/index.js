@@ -27,6 +27,81 @@ const HEADERS = {
     'Referer': 'https://sinhalasub.lk/'
 };
 
+app.get('/api/pastpaper/search', async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ success: false, message: "සෙවිය යුතු විෂය හෝ වසර ඇතුළත් කරන්න." });
+
+    try {
+        const searchUrl = `https://pastpapers.wiki/?s=${encodeURIComponent(q)}`;
+        const response = await axios.get(searchUrl, {
+            headers: { 'User-Agent': USER_AGENT }
+        });
+        const $ = cheerio.load(response.data);
+        let results = [];
+        $('.jeg_posts article.jeg_post').each((i, el) => {
+            const title = $(el).find('.jeg_post_title a').text().trim();
+            const link = $(el).find('.jeg_post_title a').attr('href');
+            const img = $(el).find('.thumbnail-container img').attr('src');
+            const excerpt = $(el).find('.jeg_post_excerpt p').text().trim();
+
+            if (title && link) {
+                results.push({
+                    title: title,
+                    url: link,
+                    thumbnail: img,
+                    description: excerpt
+                });
+            }
+        });
+
+        res.json({
+            success: true,
+            creator: "ZANTA-MD",
+            count: results.length,
+            results: results
+        });
+
+    } catch (e) {
+        res.status(500).json({ success: false, error: "PastPaper Search failed: " + e.message });
+    }
+});
+
+app.get('/api/pastpaper/dl', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ success: false, message: "URL එක ලබා දෙන්න." });
+    try {
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': USER_AGENT }
+        });
+        const $ = cheerio.load(response.data);
+        const title = $('.entry-header h1').text().trim() || $('title').text().trim();
+        let downloadLink = $('.wpfd-downloadlink').attr('href') || 
+                           $('.wpfd-single-file-button').attr('href');
+
+        if (!downloadLink) {
+            $('a').each((i, el) => {
+                const href = $(el).attr('href');
+                if (href && href.includes('/download/')) {
+                    downloadLink = href;
+                }
+            });
+        }
+
+        if (downloadLink) {
+            return res.json({
+                success: true,
+                creator: "ZANTA-MD",
+                title: title,
+                download_url: downloadLink,
+                info: "මෙම ලින්ක් එක කෙලින්ම PDF එක බාගත කිරීමට පාවිච්චි කළ හැක."
+            });
+        }
+        res.status(404).json({ success: false, message: "Download link එක සොයාගත නොහැකි විය." });
+    } catch (e) {
+        res.status(500).json({ success: false, error: "Link extraction failed: " + e.message });
+    }
+});
+
 // --- 🎬 Moviesublk Search API ---
 app.get('/api/moviesublk/search', async (req, res) => {
     const { q } = req.query;
