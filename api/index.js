@@ -1,19 +1,40 @@
 const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
+const { CookieJar } = require('tough-cookie');
+const { wrapper } = require('axios-cookiejar-support');
 const cheerio = require('cheerio');
 const app = express();
 const yts = require('yt-search');
 const crypto = require('crypto');
 
-app.use(cors());
-app.use(express.json());
-//-----------------anime hevan----------------------
-
 //---------KIS KH---------
 const KISSKH_BASE = "https://kisskh.do";
 const KISSKH_API = "https://kisskh.do/api";
 const KISSKH_COOKIE = "_ga=GA1.1.2050396191.1777544387; _ga_R3CRN9FY5Q=GS2.1.s1777544387$o1$g1$t1777544648$j60$l0$h0; g_state={\"i_l\":0,\"i_ll\":1777544383707,\"i_e\":{\"enable_itp_optimization\":0},\"i_et\":1777544383634}";
+
+const cookieJar = new CookieJar();
+const kisskhClient = wrapper(axios.create({ jar: cookieJar }));
+
+if (KISSKH_COOKIE) {
+    const cookies = KISSKH_COOKIE.split('; ');
+    for (const cookie of cookies) {
+        const [name, ...valueParts] = cookie.split('=');
+        const value = valueParts.join('=');
+        if (name && value) {
+            try {
+                cookieJar.setCookieSync(`${name}=${value}`, KISSKH_BASE);
+            } catch (e) {
+                console.log(`Cookie set error for ${name}:`, e.message);
+            }
+        }
+    }
+    console.log(`✅ Kisskh cookies loaded (${cookies.length} cookies)`);
+}
+
+app.use(cors());
+app.use(express.json());
+//-----------------anime hevan----------------------
 const BASE_URL = 'https://animeheaven.me';
 
 const getHeaders = () => ({
@@ -31,6 +52,113 @@ const HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Referer': 'https://sinhalasub.lk/'
 };
+
+app.get('/api/kisskh/search', async (req, res) => {
+    const { q, type = 0 } = req.query;
+    if (!q) return res.status(400).json({ success: false, message: "සෙවිය යුතු පදය ඇතුළත් කරන්න." });
+
+    try {
+        console.log(`🔍 Kisskh Search: "${q}", type: ${type}`);
+        
+        const response = await kisskhClient.get(`${KISSKH_API}/DramaList/Search`, {
+            params: { q: q, type: type },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Referer': 'https://kisskh.do/',
+                'Origin': 'https://kisskh.do'
+            }
+        });
+
+        let results = [];
+        const data = response.data;
+        
+        // Parse response based on structure
+        if (Array.isArray(data)) {
+            results = data.map(item => ({
+                id: item.id,
+                title: item.title || item.name,
+                poster: item.poster || item.image,
+                year: item.year,
+                country: item.country,
+                type: item.type,
+                episodes: item.episodes || item.totalEpisodes
+            }));
+        } else if (data.data && Array.isArray(data.data)) {
+            results = data.data;
+        } else if (data.items && Array.isArray(data.items)) {
+            results = data.items;
+        } else if (data.results && Array.isArray(data.results)) {
+            results = data.results;
+        }
+
+        res.json({
+            success: true,
+            creator: "ZANTA-MD",
+            query: q,
+            type: type,
+            count: results.length,
+            results: results
+        });
+
+    } catch (e) {
+        console.error("Kisskh Search Error:", e.message);
+        if (e.response) {
+            console.error("Status:", e.response.status);
+            console.error("Data:", e.response.data);
+        }
+        res.status(500).json({ success: false, error: "Search failed: " + e.message });
+    }
+});
+
+// --- Get Episode Download Links ---
+app.get('/api/kisskh/download', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ success: false, message: "Episode URL required" });
+
+    try {
+        const response = await kisskhClient.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://kisskh.do/'
+            }
+        });
+
+        const $ = cheerio.load(response.data);
+        let downloadLinks = [];
+
+        // Extract download/stream links
+        $('.server-btn, .download-btn, a[href*="download"], a[href*="m3u8"], a[href*="mp4"]').each((i, el) => {
+            const link = $(el).attr('href');
+            const server = $(el).text().trim() || `Server ${i + 1}`;
+            if (link && (link.startsWith('http') || link.startsWith('/'))) {
+                let fullLink = link;
+                if (link.startsWith('/')) {
+                    fullLink = `${KISSKH_BASE}${link}`;
+                }
+                downloadLinks.push({ server, url: fullLink });
+            }
+        });
+
+        // Check iframes
+        $('iframe').each((i, el) => {
+            const src = $(el).attr('src');
+            if (src) {
+                downloadLinks.push({ server: `Embed ${i + 1}`, url: src });
+            }
+        });
+
+        res.json({
+            success: true,
+            creator: "ZANTA-MD",
+            downloadLinks: downloadLinks,
+            count: downloadLinks.length
+        });
+
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
 
 app.get('/api/pastpaper/search', async (req, res) => {
     const { q } = req.query;
