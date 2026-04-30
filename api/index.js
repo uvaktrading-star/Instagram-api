@@ -9,6 +9,11 @@ const crypto = require('crypto');
 app.use(cors());
 app.use(express.json());
 //-----------------anime hevan----------------------
+
+//---------KIS KH---------
+const KISSKH_BASE = "https://kisskh.do";
+const KISSKH_API = "https://kisskh.do/api";
+const KISSKH_COOKIE = "_ga=GA1.1.2050396191.1777544387; _ga_R3CRN9FY5Q=GS2.1.s1777544387$o1$g1$t1777544648$j60$l0$h0; g_state={\"i_l\":0,\"i_ll\":1777544383707,\"i_e\":{\"enable_itp_optimization\":0},\"i_et\":1777544383634}";
 const BASE_URL = 'https://animeheaven.me';
 
 const getHeaders = () => ({
